@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LAN Voting</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <h1>LAN Voting (1v1)</h1>
+
+    <div class="card">
+      <div class="row">
+        <input id="name" placeholder="Dein Name" />
+        <input id="room" placeholder="Room-Code (z.B. WORMLAN2025)" />
+      </div>
+      <div class="row">
+        <button id="create">Room erstellen (Admin)</button>
+        <button id="join">Beitreten</button>
+      </div>
+      <p class="hint" id="msg"></p>
+    </div>
+
+    <div class="card" id="adminPanel" style="display:none;">
+      <h2>Admin</h2>
+      <div class="row">
+        <input id="pubLink" placeholder="Google Doc Link (/pub oder edit/view geht auch)" style="max-width:100%;width:100%;" />
+      </div>
+      <div class="row">
+        <input id="targetWinners" type="number" min="1" value="5" style="max-width:180px;" />
+        <span class="hint">Wie viele Gewinner-Spiele am Ende?</span>
+      </div>
+      <div class="row">
+        <button id="loadFromLink">Liste laden & starten</button>
+      </div>
+    </div>
+
+    <div class="card" id="status" style="display:none;">
+      <div class="row space">
+        <div>
+          <div class="big" id="progress"></div>
+          <div class="hint" id="players"></div>
+        </div>
+        <div class="hint" id="roundInfo"></div>
+      </div>
+    </div>
+
+    <div class="card" id="matchCard" style="display:none;">
+      <h2>Aktuelles Match</h2>
+
+      <div id="flash" class="flash" style="display:none;"></div>
+
+      <div class="scoreRow">
+        <div class="scoreBox">A: <span id="countA">0</span></div>
+        <div class="scoreBox">B: <span id="countB">0</span></div>
+      </div>
+
+      <div class="voteStatus" id="voteStatus"></div>
+
+      <div class="matchGrid">
+        <div class="team" id="teamA"></div>
+        <div class="vs">VS</div>
+        <div class="team" id="teamB"></div>
+      </div>
+
+      <div class="row" style="margin-top:12px;">
+        <button id="voteA">Vote A</button>
+        <button id="voteB">Vote B</button>
+      </div>
+      <p class="hint" id="matchHint"></p>
+    </div>
+
+    <div class="card" id="selectedCard" style="display:none;">
+      <h2>Ausgewählte Spiele</h2>
+      <div id="selectedList" class="selectedList"></div>
+      <p class="hint" id="doneHint"></p>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
