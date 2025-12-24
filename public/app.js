@@ -9,7 +9,7 @@ $("create").onclick = () => {
   const name = $("name").value.trim() || "Admin";
   roomCode = $("room").value.trim().toUpperCase();
   const roomName = $("roomName").value.trim();
-  const password = $("roomPw").value; // optional
+  const password = $("roomPw").value;
   socket.emit("room:create", { roomCode, roomName, name, password });
 };
 
@@ -66,7 +66,7 @@ socket.on("room:update", (state) => {
     renderTeam("teamA", "A", state.tournament.currentA);
     renderTeam("teamB", "B", state.tournament.currentB);
     renderVoteStatus(state.tournament.voteStatus || []);
-    $("matchHint").textContent = `Voten ist anonym (man sieht nur ✅/⏳). Trailer-Link öffnet YouTube Suche im neuen Tab.`;
+    $("matchHint").textContent = `Voten ist anonym (man sieht nur ✅/⏳). Trailer/Steam öffnen neuen Tab.`;
     $("voteA").disabled = false;
     $("voteB").disabled = false;
   } else {
@@ -152,10 +152,14 @@ function renderVoteStatus(list) {
     .join("");
 }
 
-// ✅ YouTube trailer search link (no API)
+// ✅ Link helpers (no API)
 function youtubeTrailerUrl(gameName) {
   const q = encodeURIComponent(`${gameName} official trailer`);
   return `https://www.youtube.com/results?search_query=${q}`;
+}
+function steamStoreSearchUrl(gameName) {
+  const q = encodeURIComponent(String(gameName || "").trim());
+  return `https://store.steampowered.com/search/?term=${q}`;
 }
 
 function euro(x) {
@@ -180,6 +184,7 @@ function renderTeam(elId, label, g) {
     : `<div class="cover placeholder">No Image</div>`;
 
   const yt = youtubeTrailerUrl(g.name || "");
+  const steam = steamStoreSearchUrl(g.name || "");
 
   el.innerHTML = `
     <div class="tag">${label}</div>
@@ -188,6 +193,7 @@ function renderTeam(elId, label, g) {
     ${formatPrice(g)}
     <div class="cardActions">
       <a class="btnLink" href="${yt}" target="_blank" rel="noopener noreferrer">YouTube Trailer</a>
+      <a class="btnLink" href="${steam}" target="_blank" rel="noopener noreferrer">Steam Store</a>
     </div>
   `;
 }
@@ -203,6 +209,7 @@ function renderSelected(list) {
         : `<div class="thumb placeholder">No Image</div>`;
 
       const yt = youtubeTrailerUrl(g.name || "");
+      const steam = steamStoreSearchUrl(g.name || "");
 
       return `
         <div class="selItem">
@@ -213,6 +220,7 @@ function renderSelected(list) {
             ${formatPrice(g)}
             <div class="selActions">
               <a class="btnLink small" href="${yt}" target="_blank" rel="noopener noreferrer">YouTube Trailer</a>
+              <a class="btnLink small" href="${steam}" target="_blank" rel="noopener noreferrer">Steam Store</a>
             </div>
           </div>
         </div>
