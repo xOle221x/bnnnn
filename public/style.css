@@ -61,16 +61,7 @@ button:disabled { opacity:0.55; cursor:not-allowed; }
 .sale { font-weight:900; }
 .only { font-weight:900; }
 
-/* Live Vote Status */
-.scoreRow { display:flex; gap:10px; margin: 8px 0 10px; }
-.scoreBox {
-  background:#0d1424;
-  border:1px solid #22304a;
-  border-radius:12px;
-  padding:8px 10px;
-  font-weight:900;
-}
-
+/* ✅ anonym vote status */
 .voteStatus { display:flex; gap:8px; flex-wrap:wrap; margin: 6px 0 10px; }
 .pill {
   background:#0d1424;
@@ -85,7 +76,7 @@ button:disabled { opacity:0.55; cursor:not-allowed; }
 .pill.pending { opacity: 0.75; }
 .pillPick { color:#a9b7d6; font-weight:900; }
 
-/* ✅ Tie Flash */
+/* tie flash */
 .flash {
   background: #0d1424;
   border: 1px solid #2b6cff;
@@ -95,9 +86,7 @@ button:disabled { opacity:0.55; cursor:not-allowed; }
   margin: 10px 0 10px;
   line-height: 1.3;
 }
-.flashIn {
-  animation: flashPop .22s ease-out;
-}
+.flashIn { animation: flashPop .22s ease-out; }
 @keyframes flashPop {
   from { transform: translateY(-4px); opacity: 0.2; }
   to { transform: translateY(0); opacity: 1; }

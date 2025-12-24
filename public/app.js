@@ -53,8 +53,6 @@ socket.on("room:update", (state) => {
   }
 
   renderSelected(state.selected || []);
-
-  // ✅ Flash for tie
   showFlash(state.flash);
 
   if (state.tournament && state.tournament.currentMatch && state.tournament.currentA && state.tournament.currentB) {
@@ -63,13 +61,10 @@ socket.on("room:update", (state) => {
     renderTeam("teamA", "A", state.tournament.currentA);
     renderTeam("teamB", "B", state.tournament.currentB);
 
-    const vc = state.tournament.voteCounts || { A: 0, B: 0 };
-    $("countA").textContent = vc.A ?? 0;
-    $("countB").textContent = vc.B ?? 0;
-
+    // ✅ Live voter list (anonym: only voted yes/no)
     renderVoteStatus(state.tournament.voteStatus || []);
 
-    $("matchHint").textContent = `Wählt A oder B. Bei Gleichstand entscheidet Kopf/Zahl (wird eingeblendet).`;
+    $("matchHint").textContent = `Voten ist anonym (man sieht nur ✅/⏳). Bei Gleichstand entscheidet Kopf/Zahl.`;
     $("voteA").disabled = false;
     $("voteB").disabled = false;
   } else {
@@ -86,15 +81,13 @@ socket.on("room:update", (state) => {
 function showFlash(flash) {
   const box = $("flash");
   if (!flash || !flash.id || !flash.text) return;
-
-  // nur neu anzeigen, wenn neue ID
   if (flash.id === lastFlashId) return;
   lastFlashId = flash.id;
 
   box.textContent = flash.text;
   box.style.display = "block";
   box.classList.remove("flashIn");
-  void box.offsetWidth; // reflow for animation
+  void box.offsetWidth;
   box.classList.add("flashIn");
 
   if (flashTimer) clearTimeout(flashTimer);
@@ -109,9 +102,10 @@ function renderVoteStatus(list) {
     box.innerHTML = "";
     return;
   }
+
   box.innerHTML = list.map(p => {
-    const cls = p.pick ? "voted" : "pending";
-    const label = p.pick === "A" ? "✅ A" : p.pick === "B" ? "✅ B" : "⏳";
+    const cls = p.voted ? "voted" : "pending";
+    const label = p.voted ? "✅" : "⏳";
     return `<div class="pill ${cls}">${escapeHtml(p.name)} <span class="pillPick">${label}</span></div>`;
   }).join("");
 }

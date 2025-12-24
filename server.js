@@ -3,7 +3,6 @@ const http = require("http");
 const { Server } = require("socket.io");
 const { nanoid } = require("nanoid");
 
-// fetch kompatibel Node 18+ oder fallback auf node-fetch (ESM)
 const fetchFn =
   typeof globalThis.fetch === "function"
     ? globalThis.fetch.bind(globalThis)
@@ -243,6 +242,10 @@ function allPlayersVoted(room, match) {
   return ids.every(pid => match.votes[pid] === "A" || match.votes[pid] === "B");
 }
 
+function getGameById(room, id) {
+  return room.pool.find(g => g.id === id) || room.selected.find(g => g.id === id) || null;
+}
+
 function decideMatchWinner(room, match) {
   const votes = Object.values(match.votes);
   const a = votes.filter(v => v === "A").length;
@@ -252,17 +255,16 @@ function decideMatchWinner(room, match) {
 
   if (a > b) {
     match.winnerId = match.aId;
-    return { tie: false, coin: null };
+    return;
   }
   if (b > a) {
     match.winnerId = match.bId;
-    return { tie: false, coin: null };
+    return;
   }
 
   const coin = Math.random() < 0.5 ? "Kopf" : "Zahl";
   match.winnerId = coin === "Kopf" ? match.aId : match.bId;
 
-  // ✅ Flash message for UI
   const winnerGame = getGameById(room, match.winnerId);
   room.flash = {
     id: nanoid(8),
@@ -271,7 +273,6 @@ function decideMatchWinner(room, match) {
   };
 
   match.note += ` | Unentschieden -> ${coin}`;
-  return { tie: true, coin };
 }
 
 function finishRoundIfDone(room) {
@@ -282,7 +283,6 @@ function finishRoundIfDone(room) {
 
   const winners = t.matches.map(m => m.winnerId).filter(id => id && id !== "BYE");
 
-  // Champion gefunden
   if (winners.length === 1) {
     const champId = winners[0];
     const champ = room.pool.find(g => g.id === champId);
@@ -299,7 +299,6 @@ function finishRoundIfDone(room) {
     return;
   }
 
-  // nächste Runde
   t.round += 1;
   t.matches = buildRoundMatchesFromIds(winners, t.round);
   t.currentMatchIdx = 0;
@@ -333,11 +332,7 @@ app.get("/img", async (req, res) => {
   }
 });
 
-// ----------------- STATE TO CLIENT (send current games + live vote status + flash) -----------------
-function getGameById(room, id) {
-  return room.pool.find(g => g.id === id) || room.selected.find(g => g.id === id) || null;
-}
-
+// ----------------- STATE TO CLIENT (ANONYM VOTE STATUS) -----------------
 function publicRoomState(room) {
   const t = room.tournament;
 
@@ -345,7 +340,6 @@ function publicRoomState(room) {
   let currentA = null;
   let currentB = null;
   let voteStatus = [];
-  let voteCounts = { A: 0, B: 0 };
 
   if (t && t.currentMatchIdx < t.matches.length) {
     const m = t.matches[t.currentMatchIdx];
@@ -354,6 +348,7 @@ function publicRoomState(room) {
       currentA = getGameById(room, m.aId);
       currentB = getGameById(room, m.bId);
 
+      // ✅ Nur voted ja/nein — KEIN A/B
       const players = Object.entries(room.players).map(([pid, p]) => ({
         pid,
         name: p.name || "Spieler"
@@ -361,18 +356,11 @@ function publicRoomState(room) {
 
       voteStatus = players.map(p => ({
         name: p.name,
-        pick: m.votes[p.pid] || null
+        voted: !!m.votes[p.pid]
       }));
-
-      const picks = Object.values(m.votes);
-      voteCounts = {
-        A: picks.filter(x => x === "A").length,
-        B: picks.filter(x => x === "B").length
-      };
     }
   }
 
-  // ✅ flash for ~5 seconds
   const flash = room.flash && (Date.now() - room.flash.ts < 5000)
     ? room.flash
     : null;
@@ -392,8 +380,7 @@ function publicRoomState(room) {
       currentMatch,
       currentA,
       currentB,
-      voteStatus,
-      voteCounts
+      voteStatus
     } : null,
     done: room.selected.length >= room.targetWinners || room.pool.length < 2
   };
