@@ -66,7 +66,7 @@ socket.on("room:update", (state) => {
     renderTeam("teamA", "A", state.tournament.currentA);
     renderTeam("teamB", "B", state.tournament.currentB);
     renderVoteStatus(state.tournament.voteStatus || []);
-    $("matchHint").textContent = `Voten ist anonym (man sieht nur ✅/⏳). Bei Gleichstand entscheidet Kopf/Zahl.`;
+    $("matchHint").textContent = `Voten ist anonym (man sieht nur ✅/⏳). Trailer-Link öffnet YouTube Suche im neuen Tab.`;
     $("voteA").disabled = false;
     $("voteB").disabled = false;
   } else {
@@ -105,7 +105,6 @@ function renderRoomsList(list) {
     })
     .join("");
 
-  // bind join buttons
   for (const btn of box.querySelectorAll(".joinBtn")) {
     btn.onclick = () => {
       const code = btn.getAttribute("data-code");
@@ -153,9 +152,16 @@ function renderVoteStatus(list) {
     .join("");
 }
 
+// ✅ YouTube trailer search link (no API)
+function youtubeTrailerUrl(gameName) {
+  const q = encodeURIComponent(`${gameName} official trailer`);
+  return `https://www.youtube.com/results?search_query=${q}`;
+}
+
 function euro(x) {
   return `${x.toFixed(2).replace(".", ",")} €`;
 }
+
 function formatPrice(g) {
   const n = g.normalPrice;
   const s = g.salePrice;
@@ -166,27 +172,38 @@ function formatPrice(g) {
   }
   return `<div class="price"><span class="only">${nf}</span></div>`;
 }
+
 function renderTeam(elId, label, g) {
   const el = $(elId);
   const img = g.imageUrl
     ? `<img class="cover" src="/img?url=${encodeURIComponent(g.imageUrl)}" alt="" />`
     : `<div class="cover placeholder">No Image</div>`;
+
+  const yt = youtubeTrailerUrl(g.name || "");
+
   el.innerHTML = `
     <div class="tag">${label}</div>
     ${img}
     <div class="name">${escapeHtml(g.name || "")}</div>
     ${formatPrice(g)}
+    <div class="cardActions">
+      <a class="btnLink" href="${yt}" target="_blank" rel="noopener noreferrer">YouTube Trailer</a>
+    </div>
   `;
 }
 
 function renderSelected(list) {
   const box = $("selectedList");
   if (!list.length) return (box.innerHTML = `<div class="hint">Noch keine Gewinner ausgewählt…</div>`);
+
   box.innerHTML = list
     .map((g, idx) => {
       const img = g.imageUrl
         ? `<img class="thumb" src="/img?url=${encodeURIComponent(g.imageUrl)}" alt="" />`
         : `<div class="thumb placeholder">No Image</div>`;
+
+      const yt = youtubeTrailerUrl(g.name || "");
+
       return `
         <div class="selItem">
           <div class="rank">#${idx + 1}</div>
@@ -194,6 +211,9 @@ function renderSelected(list) {
           <div class="selText">
             <div class="selName">${escapeHtml(g.name || "")}</div>
             ${formatPrice(g)}
+            <div class="selActions">
+              <a class="btnLink small" href="${yt}" target="_blank" rel="noopener noreferrer">YouTube Trailer</a>
+            </div>
           </div>
         </div>
       `;
@@ -202,5 +222,11 @@ function renderSelected(list) {
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[c]));
 }
