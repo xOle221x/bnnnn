@@ -11,15 +11,24 @@
     <h1>LAN Voting (1v1)</h1>
 
     <div class="card">
+      <h2>Lobby</h2>
+
       <div class="row">
         <input id="name" placeholder="Dein Name" />
         <input id="room" placeholder="Room-Code (z.B. WORMLAN2025)" />
+        <input id="roomName" placeholder="Room-Name (optional)" />
+        <input id="roomPw" placeholder="Passwort (optional)" />
       </div>
+
       <div class="row">
-        <button id="create">Room erstellen (Admin)</button>
-        <button id="join">Beitreten</button>
+        <button id="create">Room erstellen</button>
+        <button id="join">Direkt joinen (Code)</button>
+        <button id="refreshRooms">Rooms aktualisieren</button>
       </div>
+
       <p class="hint" id="msg"></p>
+      <div id="roomsList" class="roomsList"></div>
+      <p class="hint">Hinweis: Auf Render Free kann der Server schlafen/restarten → dann verschwinden Rooms (später speicherbar).</p>
     </div>
 
     <div class="card" id="adminPanel" style="display:none;">
@@ -48,7 +57,6 @@
 
     <div class="card" id="matchCard" style="display:none;">
       <h2>Aktuelles Match</h2>
-
       <div id="flash" class="flash" style="display:none;"></div>
 
       <div class="voteStatus" id="voteStatus"></div>
@@ -71,6 +79,7 @@
       <div id="selectedList" class="selectedList"></div>
       <p class="hint" id="doneHint"></p>
     </div>
+
   </div>
 
   <script src="/socket.io/socket.io.js"></script>

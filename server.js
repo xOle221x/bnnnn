@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const { nanoid } = require("nanoid");
+const crypto = require("crypto");
 
 const fetchFn =
   typeof globalThis.fetch === "function"
@@ -16,7 +17,38 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 const PORT = process.env.PORT || 3000;
 
-const rooms = {};
+const rooms = {}; // code -> room object
+
+// ----------------- small helpers -----------------
+function normCode(code) {
+  return String(code || "").trim().toUpperCase();
+}
+function validCode(code) {
+  return /^[A-Z0-9_-]{3,20}$/.test(code);
+}
+function hashPassword(pw) {
+  // Simple SHA256 (ok for "LAN-room password", not for real auth systems)
+  return crypto.createHash("sha256").update(String(pw || ""), "utf8").digest("hex");
+}
+
+function listRoomsPublic() {
+  // Only show rooms that still have an admin or at least 1 player
+  return Object.entries(rooms)
+    .filter(([, r]) => r && Object.keys(r.players || {}).length > 0)
+    .map(([code, r]) => ({
+      code,
+      locked: !!r.passwordHash,
+      name: r.roomName || code,
+      players: Object.values(r.players).map(p => p.name),
+      playerCount: Object.keys(r.players).length,
+      createdAt: r.createdAt
+    }))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+}
+
+function broadcastRoomList() {
+  io.emit("rooms:list", listRoomsPublic());
+}
 
 // ----------------- PARSING (Google Doc table) -----------------
 function stripHtml(html) {
@@ -38,23 +70,17 @@ function stripHtml(html) {
     .replace(/\s+/g, " ")
     .trim();
 }
-
 function extractPricesFromText(text) {
   const t = String(text || "");
   const matches = t.match(/\d{1,4}[.,]\d{2}/g) || [];
-  return matches
-    .map(m => parseFloat(m.replace(",", ".")))
-    .filter(n => Number.isFinite(n));
+  return matches.map(m => parseFloat(m.replace(",", "."))).filter(n => Number.isFinite(n));
 }
-
 function parseGoogleDocTableToGames(html) {
   const rows = String(html || "").match(/<tr[\s\S]*?<\/tr>/gi) || [];
   const games = [];
 
   for (const rowHtml of rows) {
-    const cells = [...rowHtml.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)]
-      .map(m => stripHtml(m[1]));
-
+    const cells = [...rowHtml.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map(m => stripHtml(m[1]));
     if (!cells.length) continue;
 
     const name = (cells[0] || "").trim();
@@ -75,13 +101,7 @@ function parseGoogleDocTableToGames(html) {
       if (salePrice !== null && salePrice === normalPrice) salePrice = null;
     }
 
-    games.push({
-      id: nanoid(8),
-      name,
-      imageUrl: "",
-      normalPrice,
-      salePrice
-    });
+    games.push({ id: nanoid(8), name, imageUrl: "", normalPrice, salePrice });
   }
 
   const seen = new Set();
@@ -96,27 +116,18 @@ function parseGoogleDocTableToGames(html) {
 function isGoogleDocAnyLink(link) {
   return /https?:\/\/docs\.google\.com\/document\//i.test(String(link || ""));
 }
-
 function normalizeGoogleDocToHtmlUrl(link) {
   const s = String(link || "").trim();
   if (/\/document\/d\/e\//i.test(s) && /\/pub/i.test(s)) return s;
 
   const m = s.match(/\/document\/d\/([a-zA-Z0-9_-]+)/i);
-  if (m) {
-    const docId = m[1];
-    return `https://docs.google.com/document/d/${docId}/export?format=html`;
-  }
+  if (m) return `https://docs.google.com/document/d/${m[1]}/export?format=html`;
   return s;
 }
-
 async function loadGamesFromDocLink(link) {
   const url = String(link || "").trim();
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    throw new Error("Link muss mit http(s) starten");
-  }
-  if (!isGoogleDocAnyLink(url)) {
-    throw new Error("Bitte einen Google-Doc Link einfügen");
-  }
+  if (!url.startsWith("http://") && !url.startsWith("https://")) throw new Error("Link muss mit http(s) starten");
+  if (!isGoogleDocAnyLink(url)) throw new Error("Bitte einen Google-Doc Link einfügen");
 
   const htmlUrl = normalizeGoogleDocToHtmlUrl(url);
   const r = await fetchFn(htmlUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
@@ -130,7 +141,6 @@ async function loadGamesFromDocLink(link) {
 
 // ----------------- STEAM AUTO COVER (NO API KEY) -----------------
 const steamCoverCache = new Map();
-
 function normalizeForSteamSearch(name) {
   return String(name || "")
     .replace(/[:™®©]/g, "")
@@ -138,7 +148,6 @@ function normalizeForSteamSearch(name) {
     .replace(/\s+/g, " ")
     .trim();
 }
-
 async function fetchSteamCover(gameName) {
   const key = String(gameName || "").toLowerCase();
   if (steamCoverCache.has(key)) return steamCoverCache.get(key);
@@ -148,17 +157,11 @@ async function fetchSteamCover(gameName) {
     const searchUrl = `https://store.steampowered.com/search/?term=${q}`;
 
     const r = await fetchFn(searchUrl, { headers: { "User-Agent": "Mozilla/5.0" } });
-    if (!r.ok) {
-      steamCoverCache.set(key, "");
-      return "";
-    }
+    if (!r.ok) return steamCoverCache.set(key, ""), "";
 
     const html = await r.text();
     const match = html.match(/data-ds-appid="(\d+)"/);
-    if (!match) {
-      steamCoverCache.set(key, "");
-      return "";
-    }
+    if (!match) return steamCoverCache.set(key, ""), "";
 
     const appId = match[1];
     const img = `https://cdn.cloudflare.steamstatic.com/steam/apps/${appId}/header.jpg`;
@@ -169,29 +172,29 @@ async function fetchSteamCover(gameName) {
     return "";
   }
 }
-
 async function enrichGamesWithSteamCovers(games) {
   const out = [];
   for (let i = 0; i < games.length; i += 4) {
     const chunk = games.slice(i, i + 4);
-    const enriched = await Promise.all(chunk.map(async g => {
-      if (g.imageUrl) return g;
-      const img = await fetchSteamCover(g.name);
-      return { ...g, imageUrl: img || "" };
-    }));
+    const enriched = await Promise.all(
+      chunk.map(async g => {
+        if (g.imageUrl) return g;
+        const img = await fetchSteamCover(g.name);
+        return { ...g, imageUrl: img || "" };
+      })
+    );
     out.push(...enriched);
   }
   return out;
 }
 
-// ----------------- TOURNAMENT (1v1 sequential) -----------------
+// ----------------- TOURNAMENT (as before) -----------------
 function shuffleInPlace(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
 }
-
 function buildRoundMatchesFromIds(ids, round) {
   const list = [...ids];
   shuffleInPlace(list);
@@ -202,50 +205,30 @@ function buildRoundMatchesFromIds(ids, round) {
     const aId = list[i];
     const bId = list[i + 1];
     const id = `R${round}-M${i / 2 + 1}`;
-
-    if (bId === "BYE") {
-      matches.push({ id, aId, bId, votes: {}, winnerId: aId, note: "Freilos (BYE)" });
-    } else {
-      matches.push({ id, aId, bId, votes: {}, winnerId: null, note: "" });
-    }
+    if (bId === "BYE") matches.push({ id, aId, bId, votes: {}, winnerId: aId, note: "Freilos (BYE)" });
+    else matches.push({ id, aId, bId, votes: {}, winnerId: null, note: "" });
   }
   return matches;
 }
-
-function startNewTournament(room) {
-  if (room.pool.length < 2) {
-    room.tournament = null;
-    return;
-  }
-
-  const ids = room.pool.map(g => g.id);
-  room.tournament = {
-    round: 1,
-    matches: buildRoundMatchesFromIds(ids, 1),
-    currentMatchIdx: 0
-  };
-
-  advanceToNextUndecidedMatch(room);
-}
-
 function advanceToNextUndecidedMatch(room) {
   const t = room.tournament;
   if (!t) return;
-  while (t.currentMatchIdx < t.matches.length && t.matches[t.currentMatchIdx].winnerId) {
-    t.currentMatchIdx++;
-  }
+  while (t.currentMatchIdx < t.matches.length && t.matches[t.currentMatchIdx].winnerId) t.currentMatchIdx++;
 }
-
+function startNewTournament(room) {
+  if (room.pool.length < 2) return (room.tournament = null);
+  const ids = room.pool.map(g => g.id);
+  room.tournament = { round: 1, matches: buildRoundMatchesFromIds(ids, 1), currentMatchIdx: 0 };
+  advanceToNextUndecidedMatch(room);
+}
 function allPlayersVoted(room, match) {
   const ids = Object.keys(room.players);
   if (!ids.length) return false;
   return ids.every(pid => match.votes[pid] === "A" || match.votes[pid] === "B");
 }
-
 function getGameById(room, id) {
   return room.pool.find(g => g.id === id) || room.selected.find(g => g.id === id) || null;
 }
-
 function decideMatchWinner(room, match) {
   const votes = Object.values(match.votes);
   const a = votes.filter(v => v === "A").length;
@@ -274,11 +257,9 @@ function decideMatchWinner(room, match) {
 
   match.note += ` | Unentschieden -> ${coin}`;
 }
-
 function finishRoundIfDone(room) {
   const t = room.tournament;
   if (!t) return;
-
   if (!t.matches.every(m => m.winnerId)) return;
 
   const winners = t.matches.map(m => m.winnerId).filter(id => id && id !== "BYE");
@@ -290,12 +271,9 @@ function finishRoundIfDone(room) {
       room.selected.push(champ);
       room.pool = room.pool.filter(g => g.id !== champId);
     }
-
     room.tournament = null;
 
-    if (room.selected.length < room.targetWinners && room.pool.length >= 2) {
-      startNewTournament(room);
-    }
+    if (room.selected.length < room.targetWinners && room.pool.length >= 2) startNewTournament(room);
     return;
   }
 
@@ -309,9 +287,7 @@ function finishRoundIfDone(room) {
 app.get("/img", async (req, res) => {
   try {
     const url = String(req.query.url || "");
-    if (!url.startsWith("http://") && !url.startsWith("https://")) {
-      return res.status(400).send("Bad url");
-    }
+    if (!url.startsWith("http://") && !url.startsWith("https://")) return res.status(400).send("Bad url");
 
     const r = await fetchFn(url, {
       headers: {
@@ -332,7 +308,7 @@ app.get("/img", async (req, res) => {
   }
 });
 
-// ----------------- STATE TO CLIENT (ANONYM VOTE STATUS) -----------------
+// ----------------- STATE TO CLIENT (anonym voted status) -----------------
 function publicRoomState(room) {
   const t = room.tournament;
 
@@ -348,78 +324,95 @@ function publicRoomState(room) {
       currentA = getGameById(room, m.aId);
       currentB = getGameById(room, m.bId);
 
-      // ✅ Nur voted ja/nein — KEIN A/B
-      const players = Object.entries(room.players).map(([pid, p]) => ({
-        pid,
-        name: p.name || "Spieler"
-      }));
-
-      voteStatus = players.map(p => ({
-        name: p.name,
-        voted: !!m.votes[p.pid]
-      }));
+      const players = Object.entries(room.players).map(([pid, p]) => ({ pid, name: p.name || "Spieler" }));
+      voteStatus = players.map(p => ({ name: p.name, voted: !!m.votes[p.pid] }));
     }
   }
 
-  const flash = room.flash && (Date.now() - room.flash.ts < 5000)
-    ? room.flash
-    : null;
+  const flash = room.flash && (Date.now() - room.flash.ts < 5000) ? room.flash : null;
 
   return {
     adminId: room.adminId,
+    roomName: room.roomName || "",
+    locked: !!room.passwordHash,
     players: Object.values(room.players).map(p => ({ name: p.name })),
     targetWinners: room.targetWinners,
     selectedCount: room.selected.length,
     poolCount: room.pool.length,
     selected: room.selected,
     flash,
-    tournament: t ? {
-      round: t.round,
-      matchNumber: Math.min(t.currentMatchIdx + 1, t.matches.length),
-      matchTotal: t.matches.length,
-      currentMatch,
-      currentA,
-      currentB,
-      voteStatus
-    } : null,
+    tournament: t
+      ? {
+          round: t.round,
+          matchNumber: Math.min(t.currentMatchIdx + 1, t.matches.length),
+          matchTotal: t.matches.length,
+          currentMatch,
+          currentA,
+          currentB,
+          voteStatus
+        }
+      : null,
     done: room.selected.length >= room.targetWinners || room.pool.length < 2
   };
 }
 
 // ----------------- SOCKET.IO -----------------
 io.on("connection", (socket) => {
-  socket.on("room:create", ({ roomCode, name }) => {
-    const code = (roomCode || "").trim().toUpperCase();
-    if (!code) return socket.emit("errorMsg", "Room-Code fehlt.");
+  // send room list on connect
+  socket.emit("rooms:list", listRoomsPublic());
+
+  socket.on("rooms:get", () => {
+    socket.emit("rooms:list", listRoomsPublic());
+  });
+
+  socket.on("room:create", ({ roomCode, roomName, name, password }) => {
+    const code = normCode(roomCode);
+    if (!validCode(code)) return socket.emit("errorMsg", "Room-Code ungültig (3-20 Zeichen: A-Z 0-9 _ -).");
+
+    if (rooms[code] && Object.keys(rooms[code].players || {}).length > 0) {
+      return socket.emit("errorMsg", "Room existiert bereits. Nimm einen anderen Code.");
+    }
 
     rooms[code] = {
       adminId: socket.id,
+      roomName: String(roomName || "").trim() || code,
+      passwordHash: password ? hashPassword(password) : null,
       players: { [socket.id]: { name: name || "Admin" } },
       link: "",
       targetWinners: 5,
       pool: [],
       selected: [],
       tournament: null,
-      flash: null
+      flash: null,
+      createdAt: Date.now()
     };
 
     socket.join(code);
     io.to(code).emit("room:update", publicRoomState(rooms[code]));
+    broadcastRoomList();
   });
 
-  socket.on("room:join", ({ roomCode, name }) => {
-    const code = (roomCode || "").trim().toUpperCase();
+  socket.on("room:join", ({ roomCode, name, password }) => {
+    const code = normCode(roomCode);
     const room = rooms[code];
     if (!room) return socket.emit("errorMsg", "Room nicht gefunden.");
 
+    // password check if locked
+    if (room.passwordHash) {
+      const ok = hashPassword(password || "") === room.passwordHash;
+      if (!ok) return socket.emit("errorMsg", "Falsches Passwort.");
+    }
+
     room.players[socket.id] = { name: name || "Spieler" };
     socket.join(code);
+
     io.to(code).emit("room:update", publicRoomState(room));
+    broadcastRoomList();
   });
 
   socket.on("admin:loadFromLink", async ({ roomCode, link, targetWinners }) => {
     try {
-      const code = (roomCode || "").trim().toUpperCase();
+      const code = normCode(roomCode);
       const room = rooms[code];
       if (!room) return;
       if (room.adminId !== socket.id) return socket.emit("errorMsg", "Nur Admin darf das.");
@@ -446,7 +439,7 @@ io.on("connection", (socket) => {
   });
 
   socket.on("vote", ({ roomCode, pick }) => {
-    const code = (roomCode || "").trim().toUpperCase();
+    const code = normCode(roomCode);
     const room = rooms[code];
     if (!room || !room.tournament) return;
 
@@ -473,13 +466,22 @@ io.on("connection", (socket) => {
     for (const [code, room] of Object.entries(rooms)) {
       if (room.players[socket.id]) {
         delete room.players[socket.id];
+
+        // admin handover
         if (room.adminId === socket.id) {
           const first = Object.keys(room.players)[0];
           room.adminId = first || null;
         }
-        io.to(code).emit("room:update", publicRoomState(room));
+
+        // if empty -> delete room
+        if (Object.keys(room.players).length === 0) {
+          delete rooms[code];
+        } else {
+          io.to(code).emit("room:update", publicRoomState(room));
+        }
       }
     }
+    broadcastRoomList();
   });
 });
 

@@ -8,14 +8,19 @@ let flashTimer = null;
 $("create").onclick = () => {
   const name = $("name").value.trim() || "Admin";
   roomCode = $("room").value.trim().toUpperCase();
-  socket.emit("room:create", { roomCode, name });
+  const roomName = $("roomName").value.trim();
+  const password = $("roomPw").value; // optional
+  socket.emit("room:create", { roomCode, roomName, name, password });
 };
 
 $("join").onclick = () => {
   const name = $("name").value.trim() || "Spieler";
   roomCode = $("room").value.trim().toUpperCase();
-  socket.emit("room:join", { roomCode, name });
+  const password = $("roomPw").value;
+  socket.emit("room:join", { roomCode, name, password });
 };
+
+$("refreshRooms").onclick = () => socket.emit("rooms:get");
 
 $("loadFromLink").onclick = () => {
   const link = $("pubLink").value.trim();
@@ -26,10 +31,14 @@ $("loadFromLink").onclick = () => {
 $("voteA").onclick = () => socket.emit("vote", { roomCode, pick: "A" });
 $("voteB").onclick = () => socket.emit("vote", { roomCode, pick: "B" });
 
-socket.on("errorMsg", (t) => $("msg").textContent = t);
+socket.on("errorMsg", (t) => ($("msg").textContent = t));
+
+socket.on("rooms:list", (rooms) => {
+  renderRoomsList(rooms || []);
+});
 
 socket.on("room:update", (state) => {
-  $("msg").textContent = `Room: ${roomCode || ""}`;
+  $("msg").textContent = `Im Room: ${roomCode || ""} ${state.locked ? "🔒" : ""}`;
 
   const isAdmin = state.adminId && state.adminId === socket.id;
   $("adminPanel").style.display = isAdmin ? "block" : "none";
@@ -40,14 +49,11 @@ socket.on("room:update", (state) => {
   const target = state.targetWinners || 5;
   const selected = state.selectedCount || 0;
 
-  $("progress").textContent =
-    `Ausgewählt: ${selected}/${target}  |  Rest im Pool: ${state.poolCount}`;
-
-  $("players").textContent = `Spieler: ${state.players.map(p => p.name).join(", ")}`;
+  $("progress").textContent = `Ausgewählt: ${selected}/${target}  |  Rest im Pool: ${state.poolCount}`;
+  $("players").textContent = `Spieler: ${state.players.map((p) => p.name).join(", ")}`;
 
   if (state.tournament) {
-    $("roundInfo").textContent =
-      `Runde ${state.tournament.round} • Match ${state.tournament.matchNumber}/${state.tournament.matchTotal}`;
+    $("roundInfo").textContent = `Runde ${state.tournament.round} • Match ${state.tournament.matchNumber}/${state.tournament.matchTotal}`;
   } else {
     $("roundInfo").textContent = `Kein aktuelles Turnier`;
   }
@@ -57,13 +63,9 @@ socket.on("room:update", (state) => {
 
   if (state.tournament && state.tournament.currentMatch && state.tournament.currentA && state.tournament.currentB) {
     $("matchCard").style.display = "block";
-
     renderTeam("teamA", "A", state.tournament.currentA);
     renderTeam("teamB", "B", state.tournament.currentB);
-
-    // ✅ Live voter list (anonym: only voted yes/no)
     renderVoteStatus(state.tournament.voteStatus || []);
-
     $("matchHint").textContent = `Voten ist anonym (man sieht nur ✅/⏳). Bei Gleichstand entscheidet Kopf/Zahl.`;
     $("voteA").disabled = false;
     $("voteB").disabled = false;
@@ -78,6 +80,51 @@ socket.on("room:update", (state) => {
     : "Läuft… Gewinner werden automatisch gesammelt (ohne Wiederholungen).";
 });
 
+function renderRoomsList(list) {
+  const box = $("roomsList");
+  if (!list.length) {
+    box.innerHTML = `<div class="hint">Keine Rooms aktiv.</div>`;
+    return;
+  }
+
+  box.innerHTML = list
+    .map((r) => {
+      const lock = r.locked ? "🔒" : "🔓";
+      const names = (r.players || []).slice(0, 4).join(", ") + ((r.players || []).length > 4 ? "…" : "");
+      return `
+        <div class="roomRow">
+          <div class="roomLeft">
+            <div class="roomTitle">${escapeHtml(r.name || r.code)} <span class="roomCode">(${escapeHtml(r.code)})</span> ${lock}</div>
+            <div class="roomMeta">${r.playerCount} Spieler • ${escapeHtml(names)}</div>
+          </div>
+          <div class="roomRight">
+            <button class="joinBtn" data-code="${escapeHtml(r.code)}" data-locked="${r.locked ? "1" : "0"}">Join</button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+
+  // bind join buttons
+  for (const btn of box.querySelectorAll(".joinBtn")) {
+    btn.onclick = () => {
+      const code = btn.getAttribute("data-code");
+      const locked = btn.getAttribute("data-locked") === "1";
+      roomCode = String(code || "").toUpperCase();
+      $("room").value = roomCode;
+
+      const name = $("name").value.trim() || "Spieler";
+      const pw = $("roomPw").value;
+
+      if (locked && !pw) {
+        $("msg").textContent = "Dieser Room ist 🔒 — bitte Passwort oben eingeben, dann erneut Join drücken.";
+        return;
+      }
+      socket.emit("room:join", { roomCode, name, password: pw });
+    };
+  }
+}
+
 function showFlash(flash) {
   const box = $("flash");
   if (!flash || !flash.id || !flash.text) return;
@@ -91,29 +138,24 @@ function showFlash(flash) {
   box.classList.add("flashIn");
 
   if (flashTimer) clearTimeout(flashTimer);
-  flashTimer = setTimeout(() => {
-    box.style.display = "none";
-  }, 4200);
+  flashTimer = setTimeout(() => (box.style.display = "none"), 4200);
 }
 
 function renderVoteStatus(list) {
   const box = $("voteStatus");
-  if (!list.length) {
-    box.innerHTML = "";
-    return;
-  }
-
-  box.innerHTML = list.map(p => {
-    const cls = p.voted ? "voted" : "pending";
-    const label = p.voted ? "✅" : "⏳";
-    return `<div class="pill ${cls}">${escapeHtml(p.name)} <span class="pillPick">${label}</span></div>`;
-  }).join("");
+  if (!list.length) return (box.innerHTML = "");
+  box.innerHTML = list
+    .map((p) => {
+      const cls = p.voted ? "voted" : "pending";
+      const label = p.voted ? "✅" : "⏳";
+      return `<div class="pill ${cls}">${escapeHtml(p.name)} <span class="pillPick">${label}</span></div>`;
+    })
+    .join("");
 }
 
 function euro(x) {
   return `${x.toFixed(2).replace(".", ",")} €`;
 }
-
 function formatPrice(g) {
   const n = g.normalPrice;
   const s = g.salePrice;
@@ -124,13 +166,11 @@ function formatPrice(g) {
   }
   return `<div class="price"><span class="only">${nf}</span></div>`;
 }
-
 function renderTeam(elId, label, g) {
   const el = $(elId);
   const img = g.imageUrl
     ? `<img class="cover" src="/img?url=${encodeURIComponent(g.imageUrl)}" alt="" />`
     : `<div class="cover placeholder">No Image</div>`;
-
   el.innerHTML = `
     <div class="tag">${label}</div>
     ${img}
@@ -141,30 +181,26 @@ function renderTeam(elId, label, g) {
 
 function renderSelected(list) {
   const box = $("selectedList");
-  if (!list.length) {
-    box.innerHTML = `<div class="hint">Noch keine Gewinner ausgewählt…</div>`;
-    return;
-  }
-  box.innerHTML = list.map((g, idx) => {
-    const img = g.imageUrl
-      ? `<img class="thumb" src="/img?url=${encodeURIComponent(g.imageUrl)}" alt="" />`
-      : `<div class="thumb placeholder">No Image</div>`;
-
-    return `
-      <div class="selItem">
-        <div class="rank">#${idx + 1}</div>
-        ${img}
-        <div class="selText">
-          <div class="selName">${escapeHtml(g.name || "")}</div>
-          ${formatPrice(g)}
+  if (!list.length) return (box.innerHTML = `<div class="hint">Noch keine Gewinner ausgewählt…</div>`);
+  box.innerHTML = list
+    .map((g, idx) => {
+      const img = g.imageUrl
+        ? `<img class="thumb" src="/img?url=${encodeURIComponent(g.imageUrl)}" alt="" />`
+        : `<div class="thumb placeholder">No Image</div>`;
+      return `
+        <div class="selItem">
+          <div class="rank">#${idx + 1}</div>
+          ${img}
+          <div class="selText">
+            <div class="selName">${escapeHtml(g.name || "")}</div>
+            ${formatPrice(g)}
+          </div>
         </div>
-      </div>
-    `;
-  }).join("");
+      `;
+    })
+    .join("");
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-  }[c]));
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
